@@ -15,8 +15,9 @@ import io
 import os.path
 import json
 import tempfile
-import distutils.command.build_ext
-from distutils.ccompiler import new_compiler
+import setuptools.command.build_ext
+from setuptools._distutils.ccompiler import new_compiler
+from setuptools._distutils.cygwinccompiler import Mingw32CCompiler
 from Cython.Build import cythonize
 import subprocess
 import sys
@@ -78,7 +79,6 @@ class build_ext_options:
             include_dirs = list(self.compiler.include_dirs)
             library_dirs = list(self.compiler.library_dirs)
             self.compiler = new_compiler(plat="nt", compiler="unix")
-            self.compiler.platform = "nt"
             self.compiler.compiler_type = "msvc"
             self.compiler.compiler = [locate_windows_llvm()]
             self.compiler.compiler_so = list(self.compiler.compiler)
@@ -90,12 +90,30 @@ class build_ext_options:
             self.compiler.library_dirs.extend(library_dirs)
             self.compiler.include_dirs = include_dirs
 
+        elif self.compiler.compiler_type == "mingw32": 
+            include_dirs = list(self.compiler.include_dirs)
+            library_dirs = list(self.compiler.library_dirs)
+            self.compiler = Mingw32CCompiler()
+            self.compiler.ranlib = ["ranlib"]
 
-class ExtensionBuilder(distutils.command.build_ext.build_ext, build_ext_options):
+            for dir in include_dirs:
+                self.compiler.add_include_dir(dir)
+
+            for dir in library_dirs:
+                self.compiler.add_library_dir(dir)
+
+            self.compiler.dll_libraries = []
+
+
+class ExtensionBuilder(setuptools.command.build_ext.build_ext, build_ext_options):
     def build_extensions(self):
         build_ext_options.build_options(self)
         if sys.platform in ("msvc", "win32"):
-            platform_name = "windows"
+            if os.getenv("MSYSTEM") and os.getenv("MSYSTEM") == "MINGW64": 
+                platform_name = "mingw64"
+            else: 
+                platform_name = "windows"
+
         elif sys.platform == "darwin":
             platform_name = "darwin"
         else:
@@ -123,7 +141,7 @@ class ExtensionBuilder(distutils.command.build_ext.build_ext, build_ext_options)
                 os.path.join(INCLUDE, "%s-%s" % (platform_name, arch))
             )
             e.extra_objects = list(short_paths)
-        distutils.command.build_ext.build_ext.build_extensions(self)
+        setuptools.command.build_ext.build_ext.build_extensions(self)
         shutil.rmtree(short_dir)
 
     def get_arch_name(self, platform_name):
@@ -142,6 +160,9 @@ class ExtensionBuilder(distutils.command.build_ext.build_ext, build_ext_options)
                 return "generic"
             else:
                 return "x86_64"
+
+        elif platform_name == "mingw64":
+            return "x86_64"
 
         # Everything else other than linux defaults to x86_64
         elif not platform_name.startswith("linux"):
@@ -205,7 +226,6 @@ class ExtensionBuilder(distutils.command.build_ext.build_ext, build_ext_options)
                 spec = json.loads(line)
                 if "environment" in spec:
                     env = spec["environment"]
-                    print(env)
                     continue
                 _, target_name = os.path.split(spec["target"])
                 if platform == "windows":
@@ -224,6 +244,12 @@ class ExtensionBuilder(distutils.command.build_ext.build_ext, build_ext_options)
                     spec["compiler"] = compiler
                 if platform == "windows":
                     spec["compiler"] = locate_windows_llvm()
+                if compiler is not None and "clang" in compiler:
+                    spec["flags"] = [
+                        f
+                        for f in spec["flags"]
+                        if "no-avx256-split-unaligned-store" not in f
+                    ]
                 # Ensure that symbols are visible to aid debugging and profiling.
                 spec["flags"] = [
                     f
@@ -236,6 +262,7 @@ class ExtensionBuilder(distutils.command.build_ext.build_ext, build_ext_options)
     def build_object(self, compiler, source, target, flags, macros, include, env=None):
         if os.path.exists(target):
             return target
+
         if not os.path.exists(source):
             raise IOError("Cannot find source file: %s" % source)
         command = compiler.split()
