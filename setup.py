@@ -373,4 +373,4 @@ setup(
         "Topic :: Scientific/Engineering",
     ],
 )
-shutil.rmtree(OBJ_DIR)
+# shutil.rmtree(OBJ_DIR)
