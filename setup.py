@@ -15,6 +15,8 @@ import io
 import os.path
 import json
 import tempfile
+from pathlib import Path
+
 import setuptools.command.build_ext
 from setuptools._distutils.ccompiler import new_compiler
 from setuptools._distutils.cygwinccompiler import Mingw32CCompiler
@@ -261,6 +263,7 @@ class ExtensionBuilder(setuptools.command.build_ext.build_ext, build_ext_options
 
     def build_object(self, compiler, source, target, flags, macros, include, env=None):
         if os.path.exists(target):
+            print(f"Found previously built target {target}.")
             return target
 
         if not os.path.exists(source):
@@ -310,7 +313,9 @@ if not BLIS_REALLY_COMPILE:
 if len(sys.argv) > 1 and sys.argv[1] == "clean":
     clean(PWD)
 
-OBJ_DIR = tempfile.mkdtemp()
+
+OBJ_DIR = Path(tempfile.mkdtemp()) if os.environ.get("TMPDIR") is None else Path(os.environ.get("TMPDIR")) / "cyblis.build"
+OBJ_DIR.mkdir(exist_ok=True)
 
 root = os.path.abspath(os.path.dirname(__file__))
 with chdir(root):
